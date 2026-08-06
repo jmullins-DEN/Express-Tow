@@ -4,7 +4,7 @@
 
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Express Tow — Camera Event Dashboard (Samsara)</title>
+<title>Express Tow — Camera Event Dashboard (Netradyne)</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -517,7 +517,7 @@ function saveStored(evts){
 
 
 function updateGroupCounts(base){
-  // Driver-group filter removed for this client (no TT drivers) — no-op.
+  // Driver-group filter removed for this client — no-op.
 }
 
 function renderWithDateFilter(allEvts){
@@ -792,7 +792,7 @@ function fetchAndMerge(onDone) {
   // every page open performs a network fetch against GitHub.
   try { localStorage.removeItem('den_events'); } catch(e) {}
   var st = document.getElementById('upSt');
-  if (st) { st.style.display = 'block'; st.textContent = 'Loading fresh Samsara data from GitHub...'; }
+  if (st) { st.style.display = 'block'; st.textContent = 'Loading fresh Netradyne data from GitHub...'; }
 
   // Cache-buster query string + no-store header so the browser/CDN
   // can never serve a stale copy of the xlsx.
@@ -826,14 +826,28 @@ function fetchAndMerge(onDone) {
       var timeKey   = hMap['time'] || hMap['datetime'];
       var typeKey   = hMap['event type'] || hMap['behaviors'] || hMap['type'];
       var statusKey = hMap['status'] || hMap['coaching status'];
-      var isSamsara = !!(timeKey && (typeKey || statusKey));
+      var netradyneIdKey = hMap['netradyne id'];
+      var coachCompletedKey = hMap['coaching completed at'];
+      var convertedKey = hMap['converted to coaching'];
+      // Netradyne files have a 'Netradyne Id' column AND a 'Coaching Completed At' column
+      var isNetradyne = !!(netradyneIdKey && coachCompletedKey);
+      var isSamsara   = !isNetradyne && !!(timeKey && (typeKey || statusKey));
 
-      var newEvts = [];
+      var newEvts = [], skippedNotCoachable = 0;
       for (var i=hi+1; i<raw.length; i++) {
         if (!raw[i] || !raw[i][0]) continue;
         var o = {};
         for (var j=0; j<hdrs.length; j++) o[hdrs[j]] = raw[i][j];
-        if (isSamsara) {
+        if (isNetradyne) {
+          // Filter: only events where Status === 'Coachable'
+          var nrStatus = String(o[statusKey] || '').trim().toLowerCase();
+          if (nrStatus !== 'coachable') { skippedNotCoachable++; continue; }
+          // Preserve fields as-is. Viewed = has Coaching Completed At, Unviewed = empty.
+          o.Datetime = (timeKey ? o[timeKey] : '') || '';
+          o.Type     = (typeKey ? o[typeKey] : '') || '';
+          // Make sure Converted To Coaching reads as YES so renderWithDateFilter keeps it
+          if (!o[convertedKey]) o['Converted To Coaching'] = 'YES';
+        } else if (isSamsara) {
           o.Datetime = (timeKey ? o[timeKey] : '') || '';
           o.Type     = (typeKey ? o[typeKey] : '') || '';
           // Status mapping: 'Coached' => viewed; 'Need Coaching'/anything else => unviewed
@@ -855,8 +869,9 @@ function fetchAndMerge(onDone) {
         var ampm = hh >= 12 ? 'PM' : 'AM';
         var h12 = ((hh + 11) % 12) + 1;
         var mmStr = (mm < 10 ? '0' : '') + mm;
+        var extra = isNetradyne ? (' \u2014 filtered to Coachable status (' + skippedNotCoachable + ' rows skipped)') : '';
         st.textContent = '\u2713 Fresh from GitHub at ' + h12 + ':' + mmStr + ' ' + ampm
-          + '  \u2014  ' + shown + ' events in window (' + newEvts.length + ' total in file)';
+          + '  \u2014  ' + shown + ' events in window (' + newEvts.length + ' coachable total)' + extra;
       }
       if (onDone) onDone();
     })
